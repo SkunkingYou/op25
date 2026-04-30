@@ -610,6 +610,10 @@ class udp_terminal(threading.Thread):
 
     def end_terminal(self):
         self.keep_running = False
+        try:
+            self.sock.close()
+        except:
+            pass
 
     def run(self):
         while self.keep_running:
@@ -675,5 +679,10 @@ if __name__ == '__main__':
         sys.stderr.write('terminal: exception occurred\n')
         sys.stderr.write('terminal: exception:\n%s\n' % traceback.format_exc())
     finally:
-        if terminal is not None and terminal.terminal is not None:
-            terminal.terminal.end_terminal()
+        if terminal is not None:
+            if terminal.terminal is not None:
+                terminal.terminal.end_terminal()
+            try:
+                terminal.sock.close()
+            except:
+                pass

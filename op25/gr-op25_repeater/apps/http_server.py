@@ -59,7 +59,8 @@ def static_file(environ, start_response):
         content_type = 'text/plain'
         output = status
     else:
-        output = open(pathname, 'rb').read()
+        with open(pathname, 'rb') as f:
+            output = f.read()
         content_type = content_types[suf]
         status = '200 OK'
     return status, content_type, output
@@ -123,12 +124,13 @@ def application(environ, start_response):
     return result
 
 def process_qmsg(msg):
-    if my_recv_q.full_p():
-        my_recv_q.delete_head_nowait()   # ignores result
-    if my_recv_q.full_p():
-        return
-    if not my_recv_q.full_p():
-        my_recv_q.insert_tail(msg)
+    try:
+        if my_recv_q.full_p():
+            my_recv_q.delete_head_nowait()   # drop oldest message if queue is full
+        if not my_recv_q.full_p():
+            my_recv_q.insert_tail(msg)
+    except:
+        pass  # silently ignore queue errors
 
 class http_server(object):
     def __init__(self, input_q, output_q, endpoint, **kwds):

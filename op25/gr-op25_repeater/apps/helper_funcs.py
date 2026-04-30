@@ -65,9 +65,11 @@ def get_key_dict(keys_file, _id = 0):      # used to read crypt keys files
     #TODO: error handling for borked .json files
     keys_config = {}
     if sys.version[0] == '2':
-        raw_config = json.loads(open(keys_file).read())
+        with open(keys_file) as f:
+            raw_config = json.loads(f.read())
     else:
-        raw_config = json.loads(open(keys_file, encoding="utf-8-sig").read())
+        with open(keys_file, encoding="utf-8-sig") as f:
+            raw_config = json.loads(f.read())
     for dict_key in raw_config.keys():     # iterate through dict and convert strings to integers
         keyid = int(ast.literal_eval(str(dict_key)))
         algid = int(ast.literal_eval(str(from_dict(raw_config[dict_key], "algid", "0"))))
