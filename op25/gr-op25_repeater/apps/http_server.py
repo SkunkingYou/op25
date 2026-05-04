@@ -74,8 +74,9 @@ def post_req(environ, start_response, postdata):
             msg = gr.message().make_from_string(str(d['command']), -2, d['arg1'], d['arg2'])
             if not my_output_q.full_p():
                 my_output_q.insert_tail(msg)
+            else:
+                sys.stderr.write('post_req: output queue full, dropping command: %s\n' % d['command'])
         valid_req = True
-        time.sleep(0.2)
     except:
         sys.stderr.write('post_req: error processing input: %s\n%s\n' % (postdata, traceback.format_exc()))
 
@@ -114,23 +115,37 @@ def http_request(environ, start_response):
     return [output]
 
 def application(environ, start_response):
-    failed = False
     try:
-        result = http_request(environ, start_response)
+        return http_request(environ, start_response)
     except:
-        failed = True
         sys.stderr.write('application: request failed:\n%s\n' % traceback.format_exc())
-        sys.exit(1)
-    return result
+        status = '500 INTERNAL SERVER ERROR'
+        content_type = 'text/plain'
+        output = 'Internal Server Error'
+        response_headers = [('Content-type', content_type),
+                            ('Content-Length', str(len(output)))]
+        start_response(status, response_headers)
+        if sys.version[0] > '2':
+            output = output.encode()
+        return [output]
 
 def process_qmsg(msg):
     try:
+        # If queue is full, try to make space by dropping oldest message
         if my_recv_q.full_p():
-            my_recv_q.delete_head_nowait()   # drop oldest message if queue is full
+            try:
+                my_recv_q.delete_head_nowait()
+                sys.stderr.write('process_qmsg: response queue full, dropped oldest message\n')
+            except:
+                sys.stderr.write('process_qmsg: could not delete from full queue\n')
+                return
+        # Now try to insert the message
         if not my_recv_q.full_p():
             my_recv_q.insert_tail(msg)
-    except:
-        pass  # silently ignore queue errors
+        else:
+            sys.stderr.write('process_qmsg: response queue still full after cleanup, dropping message\n')
+    except Exception as e:
+        sys.stderr.write('process_qmsg: error handling queue message: %s\n' % str(e))
 
 class http_server(object):
     def __init__(self, input_q, output_q, endpoint, **kwds):
@@ -142,7 +157,7 @@ class http_server(object):
         my_output_q = output_q
         my_port = int(port)
 
-        my_recv_q = gr.msg_queue(10)
+        my_recv_q = gr.msg_queue(30)  # Increased from 10 to 30 to reduce message dropping
         self.q_watcher = queue_watcher(my_input_q, process_qmsg)
 
         try:

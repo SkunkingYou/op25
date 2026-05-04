@@ -39,6 +39,7 @@ var send_qfull = 0;
 var send_queue = [];
 var request_count = 0;
 var SEND_QLIMIT = 5;
+var send_in_flight = false;  // Flag to prevent concurrent requests
 var c_freq = 0;
 var c_ppm = null;
 var c_system = null;
@@ -1572,38 +1573,57 @@ function send_command(command, arg1 = 0, arg2 = 0) {
     request_count += 1;
     if (send_queue.length >= SEND_QLIMIT) {
         send_qfull += 1;
-        send_queue.unshift();
+        send_queue.shift();
     }
     send_queue.push( {"command": command, "arg1": arg1, "arg2": arg2} );
     send_process();
 }
 
 async function send_process() {
+    // Prevent concurrent requests while one is in-flight
+    if (send_in_flight) {
+        console.warn("send_process: request already in-flight, skipping");
+        return;
+    }
+
     const cmd = JSON.stringify(send_queue);
     send_queue = [];  // Clear the queue immediately
 
     const wbox = document.getElementById('warning-box');
     const wtxt = document.getElementById('warning-text');
 
+    send_in_flight = true;  // Mark request as in-flight
+
     try {
+        // Create abort controller with 10 second timeout
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 10000);
+
         const response = await fetch("/", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: cmd
+            body: cmd,
+            signal: controller.signal
         });
+
+        clearTimeout(timeoutId);
 
         if (!response.ok) {
             http_errors += 1;
             wbox.style.display = "flex";
             wtxt.innerText = "HTTP Error: " + response.status;
             console.error("HTTP Error:", response.status, response.statusText);
+            send_in_flight = false;
             return;
         }
 
         http_ok += 1;
 
         const dl = await response.json();
-        if (!dl) return;
+        if (!dl) {
+            send_in_flight = false;
+            return;
+        }
 
         wbox.style.display = "none";
 
@@ -1617,8 +1637,14 @@ async function send_process() {
     } catch (error) {
         fetch_errors += 1;
         wbox.style.display = "flex";
-        wtxt.innerText = "Fetch Error: " + (error.message || error);
+        if (error.name === 'AbortError') {
+            wtxt.innerText = "Request Timeout (10s): Server not responding";
+        } else {
+            wtxt.innerText = "Fetch Error: " + (error.message || error);
+        }
         console.error("Fetch Exception Details:", error.stack || error);
+    } finally {
+        send_in_flight = false;  // Always clear the flag when done
     }
 }
 
